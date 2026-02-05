@@ -4,30 +4,23 @@ import uuid
 import gc
 import torch
 import re
+import numpy as np
+from PIL import Image
 
 def get_temp_dir():
     """
     Creates a unique temporary directory for the current batch run.
-    Follows the structure: ComfyUI/output/OracleMotion_Temp/<uuid>/
+    Follows the structure: ComfyUI/output/OracleMotion_Project_{UUID}/
     """
-    # Attempt to locate ComfyUI base directory
-    # Assumes this file is in ComfyUI/custom_nodes/ComfyUI-OracleMotion/utils.py
     current_dir = os.path.dirname(os.path.abspath(__file__))
-
-    # Traverse up to find ComfyUI root (usually 2 levels up from custom_nodes/repo)
-    # structure: root/custom_nodes/ComfyUI-OracleMotion/utils.py
-    # root is 2 levels up from the directory containing this file
     comfy_root = os.path.dirname(os.path.dirname(current_dir))
-
-    # Verify if 'output' exists there, otherwise just use a local output folder to be safe
     output_base = os.path.join(comfy_root, "output")
+
     if not os.path.exists(output_base):
-        # Fallback if we are not in standard structure
         output_base = os.path.join(current_dir, "output")
 
-    temp_base = os.path.join(output_base, "OracleMotion_Temp")
     unique_run_id = str(uuid.uuid4())
-    run_dir = os.path.join(temp_base, unique_run_id)
+    run_dir = os.path.join(output_base, f"OracleMotion_Project_{unique_run_id}")
 
     os.makedirs(run_dir, exist_ok=True)
     return run_dir
@@ -46,12 +39,10 @@ def parse_json_output(text):
     Robustly parses JSON from LLM output, handling markdown code blocks.
     """
     try:
-        # If text contains markdown code blocks, extract the content
         match = re.search(r"```json\s*(.*?)```", text, re.DOTALL)
         if match:
             text = match.group(1)
         else:
-             # Try generic code block
             match = re.search(r"```\s*(.*?)```", text, re.DOTALL)
             if match:
                 text = match.group(1)
@@ -59,6 +50,52 @@ def parse_json_output(text):
         return json.loads(text)
     except json.JSONDecodeError as e:
         print(f"Error parsing JSON: {e}")
-        # Return empty list or raise, depending on desired behavior.
-        # Returning None to signal failure.
+        return []
+
+def load_image_from_path(path):
+    """
+    Robustly loads an image from a path.
+    Returns a PIL Image or None if not found/failed.
+    """
+    if not os.path.exists(path):
+        print(f"Error: Image not found at {path}")
         return None
+    try:
+        return Image.open(path).convert("RGB")
+    except Exception as e:
+        print(f"Error loading image from {path}: {e}")
+        return None
+
+# Alias for consistency if called elsewhere
+load_image_as_pil = load_image_from_path
+
+def make_grid(keyframe_paths):
+    """
+    Creates a contact sheet (grid) from a list of image paths.
+    Returns: torch.Tensor [1, H, W, C] suitable for ComfyUI IMAGE output.
+    """
+    images = []
+    for path in keyframe_paths:
+        img = load_image_from_path(path)
+        if img:
+            images.append(img)
+
+    if not images:
+        return torch.zeros((1, 512, 512, 3)) # Return black square if no images
+
+    # Assume all images are same size for simplicity, or resize to first image size
+    w, h = images[0].size
+    grid_w = w * len(images)
+    grid_h = h
+
+    grid = Image.new('RGB', (grid_w, grid_h))
+    for i, img in enumerate(images):
+        if img.size != (w, h):
+            img = img.resize((w, h))
+        grid.paste(img, (i * w, 0))
+
+    # Convert PIL to Tensor [1, H, W, C] (0-1 float)
+    grid_np = np.array(grid).astype(np.float32) / 255.0
+    grid_tensor = torch.from_numpy(grid_np).unsqueeze(0)
+
+    return grid_tensor

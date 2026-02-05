@@ -1,7 +1,10 @@
 diffusers>=0.30.0
 transformers
-accelerate
-opencv-python-headless
+huggingface_hub
 moviepy
 openai
 faster-whisper
+opencv-python-headless
+numpy
+pillow
+accelerate
