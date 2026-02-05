@@ -1,10 +1,10 @@
-# ComfyUI-OracleMotion V2
+# ComfyUI-OracleMotion 
 
 Este proyecto implementa una arquitectura avanzada de "Serial Batch Processing" para la generación de historias animadas dentro de ComfyUI. Está diseñado para operar eficientemente en entornos con recursos limitados (como una RTX 3090) mediante la gestión estricta de VRAM y el uso de modelos de última generación.
 
 El proyecto original y la inspiración provienen de [ToonComposer de TencentARC](https://github.com/TencentARC/ToonComposer), adaptado y evolucionado aquí para flujos de trabajo locales y modulares.
 
-## 🚀 Filosofía del Proyecto (V2)
+## 🚀 Filosofía del Proyecto 
 
 - **Serial Batch Processing:** En lugar de cargar todos los modelos a la vez, el sistema procesa cada etapa secuencialmente y limpia agresivamente la VRAM entre pasos.
 - **Dependencias Limpias:** Se evita el "infierno de dependencias" utilizando el ecosistema nativo de HuggingFace (`diffusers`, `transformers`) y evitando reinstalaciones innecesarias de PyTorch.
