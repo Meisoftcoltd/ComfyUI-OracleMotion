@@ -9,3 +9,7 @@ numpy
 pillow
 accelerate
 llama-cpp-python
+soundfile
+edge-tts
+kokoro-onnx
+scipy
