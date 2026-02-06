@@ -17,7 +17,7 @@ try:
 except ImportError:
     WhisperModel = None
 
-class OracleBrain:
+class OracleBrainAPI:
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -35,7 +35,7 @@ class OracleBrain:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("storyboard_json",)
     FUNCTION = "generate_storyboard"
-    CATEGORY = "OracleMotion"
+    CATEGORY = "🪬 OracleMotion"
 
     def generate_storyboard(self, narrative_text, model_name, base_url, api_key, audio_path=""):
         text_input = narrative_text
@@ -97,6 +97,130 @@ Ensure the prompts are descriptive and consistent.
 
         return (json.dumps(parsed_json, indent=2),)
 
+class OracleBrainLocal:
+    @classmethod
+    def INPUT_TYPES(s):
+        from .utils import get_llm_models
+        models = get_llm_models()
+        return {
+            "required": {
+                "llm_model": (models if models else ["No models found"],),
+                "narrative_text": ("STRING", {"multiline": True, "default": "A cyberpunk detective walking through a rainy neon city."}),
+                "context_window": ("INT", {"default": 8192, "min": 2048, "max": 32768}),
+                "max_tokens": ("INT", {"default": 2048, "min": 128, "max": 8192}),
+                "gpu_layers": ("INT", {"default": 33, "min": 0, "max": 100}),
+                "temperature": ("FLOAT", {"default": 0.7, "min": 0.1, "max": 2.0, "step": 0.1}),
+            }
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("storyboard_json",)
+    FUNCTION = "generate_storyboard_local"
+    CATEGORY = "🪬 OracleMotion"
+
+    def generate_storyboard_local(self, llm_model, narrative_text, context_window, max_tokens, gpu_layers, temperature):
+        from .utils import parse_json_output
+        try:
+            from llama_cpp import Llama
+        except ImportError:
+            raise ImportError("llama-cpp-python is required for local LLM support. Please install it.")
+
+        import folder_paths
+
+        # Locate the model
+        model_path = folder_paths.get_full_path("LLM", llm_model)
+        # Fallback if folder_paths doesn't find it but we scanned it
+        if not model_path or not os.path.exists(model_path):
+             # Try to construct path based on scan logic in utils
+             # This is a bit redundant but safe
+             current_dir = os.path.dirname(os.path.abspath(__file__))
+             comfy_root = os.path.dirname(os.path.dirname(current_dir))
+             possible_paths = [
+                os.path.join(comfy_root, "models", "LLM", llm_model),
+                os.path.join(comfy_root, "models", "llama", llm_model),
+             ]
+             for p in possible_paths:
+                 if os.path.exists(p):
+                     model_path = p
+                     break
+
+        if not model_path or not os.path.exists(model_path):
+            raise RuntimeError(f"Model file not found: {llm_model}")
+
+        print(f"Loading Local LLM: {model_path} with {gpu_layers} GPU layers...")
+        llm = Llama(
+            model_path=model_path,
+            n_ctx=context_window,
+            n_gpu_layers=gpu_layers,
+            verbose=False
+        )
+
+        SYSTEM_PROMPT = """
+You are an expert Director of Photography and Screenwriter.
+Your task is to convert the user's narrative or idea into a structured visual storyboard.
+
+RULES:
+1. Output MUST be a valid JSON list of objects.
+2. Each object represents a scene (keyframe).
+3. Keys required per object:
+   - "frame": (int) frame number (assume 24fps, so 0, 48, 96...).
+   - "prompt": (string) detailed visual description for image generation.
+   - "action": (string) description of movement for video generation.
+   - "path": (string) leave empty, used for reference image path later.
+
+Ensure the prompts are descriptive and consistent.
+"""
+
+        # Construct Prompt (Generic Template)
+        # Checking for specific models could improve this, but a standard ChatML or User/Assistant usually works for many GGUFs
+        # or just raw text.
+        # "Generic Template: System: {system_prompt}\nUser: {user_prompt}\nAssistant:"
+
+        prompt = f"System: {SYSTEM_PROMPT}\nUser: {narrative_text}\nAssistant:"
+
+        # Attempt to constrain to JSON if possible
+        # llama-cpp-python > 0.2.23 supports response_format
+        kwargs = {
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "stop": ["User:", "System:"],
+            "echo": False
+        }
+
+        try:
+            # New API
+            response = llm.create_chat_completion(
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": narrative_text}
+                ],
+                max_tokens=max_tokens,
+                temperature=temperature,
+                response_format={"type": "json_object"} # Try to enforce JSON
+            )
+            content = response["choices"][0]["message"]["content"]
+        except Exception as e:
+            print(f"Chat API failed or not supported, falling back to completion: {e}")
+            # Fallback to completion
+            prompt = f"{SYSTEM_PROMPT}\n\nUSER REQUEST: {narrative_text}\n\nOUTPUT JSON:"
+            response = llm(
+                prompt,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                stop=["User:", "System:"]
+            )
+            content = response["choices"][0]["text"]
+
+        parsed_json = parse_json_output(content)
+        if not parsed_json:
+            parsed_json = []
+
+        # Clean up
+        del llm
+        cleanup_vram()
+
+        return (json.dumps(parsed_json, indent=2),)
+
 class OracleDirector:
     @classmethod
     def INPUT_TYPES(s):
@@ -112,7 +236,7 @@ class OracleDirector:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("finalized_json",)
     FUNCTION = "direct_scenes"
-    CATEGORY = "OracleMotion"
+    CATEGORY = "🪬 OracleMotion"
 
     def direct_scenes(self, storyboard_json, user_edits="[]"):
         # Load AI generated storyboard
@@ -183,7 +307,7 @@ class OracleVisualizer:
     RETURN_TYPES = ("LIST", "IMAGE")
     RETURN_NAMES = ("keyframe_paths", "preview_image")
     FUNCTION = "generate_keyframes"
-    CATEGORY = "OracleMotion"
+    CATEGORY = "🪬 OracleMotion"
 
     def generate_keyframes(self, storyboard_json, sdxl_ckpt, global_style_prompt):
         # Lazy imports
@@ -299,7 +423,7 @@ class OracleEngine:
     RETURN_TYPES = ("LIST",)
     RETURN_NAMES = ("video_paths",)
     FUNCTION = "animate_scenes"
-    CATEGORY = "OracleMotion"
+    CATEGORY = "🪬 OracleMotion"
 
     def animate_scenes(self, model, vae, clip, keyframe_paths, frames, steps, cfg, sampler_name, scheduler, denoise, positive="high quality", negative="low quality"):
         from diffusers.utils import export_to_video
@@ -464,7 +588,7 @@ class OracleEditor:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("final_video_path",)
     FUNCTION = "stitch_videos"
-    CATEGORY = "OracleMotion"
+    CATEGORY = "🪬 OracleMotion"
 
     def stitch_videos(self, video_paths):
         from moviepy.editor import VideoFileClip, concatenate_videoclips

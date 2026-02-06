@@ -99,3 +99,37 @@ def make_grid(keyframe_paths):
     grid_tensor = torch.from_numpy(grid_np).unsqueeze(0)
 
     return grid_tensor
+
+def get_llm_models():
+    """
+    Scans for GGUF models in standard locations.
+    Returns a list of filenames.
+    """
+    import folder_paths
+
+    # Try getting from ComfyUI defined paths if available
+    try:
+        models = folder_paths.get_filename_list("LLM")
+        if models:
+            return [m for m in models if m.endswith(".gguf")]
+    except:
+        pass
+
+    # Fallback/Additional manual scan
+    # Assuming utils.py is in custom_nodes/ComfyUI-OracleMotion
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    comfy_root = os.path.dirname(os.path.dirname(current_dir))
+
+    possible_paths = [
+        os.path.join(comfy_root, "models", "LLM"),
+        os.path.join(comfy_root, "models", "llama"), # Common alternative
+    ]
+
+    found_models = []
+    for p in possible_paths:
+        if os.path.exists(p):
+            for f in os.listdir(p):
+                if f.endswith(".gguf"):
+                    found_models.append(f)
+
+    return sorted(list(set(found_models)))

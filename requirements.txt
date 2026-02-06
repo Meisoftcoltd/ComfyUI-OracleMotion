@@ -8,3 +8,4 @@ opencv-python-headless
 numpy
 pillow
 accelerate
+llama-cpp-python
