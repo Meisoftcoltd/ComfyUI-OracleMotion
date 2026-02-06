@@ -133,3 +133,29 @@ def get_llm_models():
                     found_models.append(f)
 
     return sorted(list(set(found_models)))
+
+def get_font_path():
+    """
+    Scans fonts/ directory for .ttf files. Returns first valid one or generic fallback.
+    """
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    fonts_dir = os.path.join(current_dir, "fonts")
+
+    if os.path.exists(fonts_dir):
+        for f in os.listdir(fonts_dir):
+            if f.endswith(".ttf") or f.endswith(".otf"):
+                return os.path.join(fonts_dir, f)
+
+    # Fallback to system font if possible, or warning
+    # On Linux/WSL, we might try to find a common one
+    common_paths = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        "C:\\Windows\\Fonts\\arial.ttf"
+    ]
+    for p in common_paths:
+        if os.path.exists(p):
+            return p
+
+    print("Warning: No custom font found in 'fonts/' and no system fallback found. Text rendering might fail or look generic.")
+    return "arial.ttf" # Hope for the best with PIL default loading

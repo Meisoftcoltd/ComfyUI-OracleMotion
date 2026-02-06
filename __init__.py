@@ -1,4 +1,4 @@
-from .nodes import OracleBrainAPI, OracleBrainLocal, OracleDirector, OracleVisualizer, OracleEngine, OracleEditor, OracleVoiceKokoro, OracleVoiceInjector
+from .nodes import OracleBrainAPI, OracleBrainLocal, OracleDirector, OracleVisualizer, OracleEngine, OraclePostProduction, OracleVoiceKokoro, OracleVoiceInjector
 
 WEB_DIRECTORY = "./web"
 
@@ -10,7 +10,7 @@ NODE_CLASS_MAPPINGS = {
     "OracleDirector": OracleDirector,
     "OracleVisualizer": OracleVisualizer,
     "OracleEngine": OracleEngine,
-    "OracleEditor": OracleEditor
+    "OraclePostProduction": OraclePostProduction
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -21,7 +21,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "OracleDirector": "🪬 Oracle Director (Timeline Studio)",
     "OracleVisualizer": "🎨 Oracle Visualizer (Art Gen)",
     "OracleEngine": "🎬 Oracle Engine (Agnostic Animator)",
-    "OracleEditor": "✂️ Oracle Editor (AV Mixer & Subs)"
+    "OraclePostProduction": "✂️ Oracle Post-Production (Viral Editor)"
 }
 
 __all__ = ['NODE_CLASS_MAPPINGS', 'NODE_DISPLAY_NAME_MAPPINGS', 'WEB_DIRECTORY']

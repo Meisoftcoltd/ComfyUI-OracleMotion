@@ -525,95 +525,196 @@ class OracleEngine:
 
         return (video_paths,)
 
-class OracleEditor:
+class OraclePostProduction:
     @classmethod
     def INPUT_TYPES(s):
+        from .utils import get_font_path
+        font_path = get_font_path()
         return {
             "required": {
+                "enhanced_storyboard_json": ("STRING", {"forceInput": True}),
+                "font_size": ("INT", {"default": 60, "min": 10}),
+                "font_color": ("STRING", {"default": "#FFD700"}),
+                "stroke_width": ("INT", {"default": 4, "min": 0}),
+                "position_y": ("INT", {"default": 100, "min": 0}),
+                "preview_mode": ("BOOLEAN", {"default": True}),
+            },
+            "optional": {
                 "video_paths": ("LIST",),
-                "storyboard_json": ("STRING", {"forceInput": True}),
+                "preview_background": ("IMAGE",),
+                "font_path": ("STRING", {"default": font_path}),
             }
         }
-    RETURN_TYPES = ("STRING", "STRING")
-    RETURN_NAMES = ("final_video_path", "subtitle_path")
-    FUNCTION = "stitch_videos"
+
+    RETURN_TYPES = ("STRING", "IMAGE")
+    RETURN_NAMES = ("final_video_path", "preview_image")
+    FUNCTION = "post_production"
     CATEGORY = "🪬 OracleMotion"
 
-    def stitch_videos(self, video_paths, storyboard_json):
+    def post_production(self, enhanced_storyboard_json, font_size, font_color, stroke_width, position_y, preview_mode, video_paths=None, preview_background=None, font_path=None):
         from moviepy.editor import VideoFileClip, concatenate_videoclips, AudioFileClip
+        from PIL import Image, ImageDraw, ImageFont
+        import numpy as np
 
-        scenes = json.loads(storyboard_json)
+        scenes = json.loads(enhanced_storyboard_json)
         temp_dir = get_temp_dir()
-        clips = []
 
+        # Helper to hex to rgb
+        def hex_to_rgb(hex_color):
+            hex_color = hex_color.lstrip('#')
+            if len(hex_color) == 6:
+                return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+            return (255, 215, 0) # Gold default
+
+        text_color = hex_to_rgb(font_color)
+        stroke_color = (0, 0, 0)
+
+        # Setup Font
+        try:
+            if font_path and os.path.exists(font_path):
+                font = ImageFont.truetype(font_path, font_size)
+            else:
+                from .utils import get_font_path
+                fallback = get_font_path()
+                font = ImageFont.truetype(fallback, font_size)
+        except Exception as e:
+            print(f"Font loading error: {e}. Using default.")
+            font = ImageFont.load_default()
+
+        # --- LOGIC BRANCH 1: PREVIEW MODE ---
+        if preview_mode:
+            print("Running OraclePostProduction in PREVIEW MODE")
+            # Create canvas
+            W, H = 1080, 1920
+            if preview_background is not None:
+                # ComfyUI Image is Tensor [1, H, W, 3]
+                # Convert first image to PIL
+                p_img = 255. * preview_background[0].cpu().numpy()
+                img = Image.fromarray(np.clip(p_img, 0, 255).astype(np.uint8)).convert("RGB")
+                W, H = img.size
+            else:
+                img = Image.new("RGB", (W, H), (0, 0, 0))
+
+            draw = ImageDraw.Draw(img)
+
+            # Find sample text
+            sample_text = "SAMPLE CAPTION TEXT"
+            for scene in scenes:
+                if scene.get("dialogue"):
+                    sample_text = scene.get("dialogue")
+                    break
+
+            # Draw Text (Centered X, Position Y from bottom)
+            try:
+                # PIL < 10 bbox; PIL >= 10 getbbox?
+                # Using simple approach
+                left, top, right, bottom = draw.textbbox((0, 0), sample_text, font=font)
+                text_width = right - left
+                text_height = bottom - top
+            except:
+                 text_width, text_height = font.getsize(sample_text)
+
+            x = (W - text_width) / 2
+            y = H - position_y - text_height
+
+            # Stroke
+            draw.text((x, y), sample_text, font=font, fill=text_color, stroke_width=stroke_width, stroke_fill=stroke_color)
+
+            # Return Image Tensor
+            img_np = np.array(img).astype(np.float32) / 255.0
+            preview_tensor = torch.from_numpy(img_np).unsqueeze(0)
+
+            return ("", preview_tensor)
+
+        # --- LOGIC BRANCH 2: RENDER MODE ---
+        print("Running OraclePostProduction in RENDER MODE")
+        if not video_paths:
+            raise RuntimeError("No video_paths provided for render mode.")
+
+        # 1. Stitch Videos & Audio
+        clips = []
         try:
             for i, path in enumerate(video_paths):
                 if os.path.exists(path):
                     clip = VideoFileClip(path)
-
-                    # Attach audio if available in scene data
+                    # Sync Audio
                     if i < len(scenes):
                         audio_path = scenes[i].get("audio_path", "")
                         if audio_path and os.path.exists(audio_path):
                             audio_clip = AudioFileClip(audio_path)
                             clip = clip.set_audio(audio_clip)
-                            # Ensure video duration matches audio duration logic
-                            # (Though Engine should have handled frames count, tiny discrepancies can exist)
                             if abs(clip.duration - audio_clip.duration) > 0.1:
                                 clip = clip.set_duration(audio_clip.duration)
-
                     clips.append(clip)
-                else:
-                    print(f"Warning: Video clip not found at {path}, skipping.")
-
-            if not clips:
-                raise RuntimeError("No valid video clips to stitch.")
-
-            final_clip = concatenate_videoclips(clips, method="compose")
-
-            output_filename = f"final_movie_{uuid.uuid4().hex[:6]}.mp4"
-            output_path = os.path.join(temp_dir, output_filename)
-
-            # Write video file
-            final_clip.write_videofile(output_path, codec="libx264", audio_codec="aac")
-
-            # Generate SRT
-            srt_filename = f"subtitles_{uuid.uuid4().hex[:6]}.srt"
-            srt_path = os.path.join(temp_dir, srt_filename)
-
-            with open(srt_path, "w", encoding="utf-8") as f:
-                current_time = 0.0
-                for i, scene in enumerate(scenes):
-                    if i >= len(clips): break
-
-                    dialogue = scene.get("dialogue", "").strip()
-                    duration = clips[i].duration
-
-                    if dialogue:
-                        start_time = current_time
-                        end_time = current_time + duration
-
-                        def format_time(t):
-                            import datetime
-                            # milliseconds
-                            msec = int((t % 1) * 1000)
-                            t_int = int(t)
-                            return f"{datetime.timedelta(seconds=t_int)},{msec:03d}"
-
-                        f.write(f"{i+1}\n")
-                        f.write(f"{format_time(start_time)} --> {format_time(end_time)}\n")
-                        f.write(f"{dialogue}\n\n")
-
-                    current_time += duration
-
         except Exception as e:
-            raise RuntimeError(f"Failed to stitch videos: {e}")
-        finally:
-            for clip in clips:
-                try: clip.close()
-                except: pass
+            raise RuntimeError(f"Error loading clips: {e}")
 
-        return (output_path, srt_path)
+        if not clips:
+             raise RuntimeError("No clips found.")
+
+        final_clip = concatenate_videoclips(clips, method="compose")
+
+        # 2. Prepare Timings for Captions
+        # Create a list of (start_time, end_time, text)
+        captions = []
+        current_t = 0.0
+        for i, clip in enumerate(clips):
+            if i < len(scenes):
+                text = scenes[i].get("dialogue", "").strip()
+                if text:
+                    captions.append({
+                        "start": current_t,
+                        "end": current_t + clip.duration,
+                        "text": text
+                    })
+            current_t += clip.duration
+
+        # 3. Viral Burn Filter
+        def burn_text(get_frame, t):
+            frame = get_frame(t) # Numpy array [H, W, 3]
+
+            # Find active caption
+            active_text = None
+            for cap in captions:
+                if cap["start"] <= t < cap["end"]:
+                    active_text = cap["text"]
+                    break
+
+            if active_text:
+                img = Image.fromarray(frame)
+                draw = ImageDraw.Draw(img)
+                W, H = img.size
+
+                # Measure
+                try:
+                    left, top, right, bottom = draw.textbbox((0, 0), active_text, font=font)
+                    tw = right - left
+                    th = bottom - top
+                except:
+                     tw, th = font.getsize(active_text)
+
+                x = (W - tw) / 2
+                y = H - position_y - th
+
+                draw.text((x, y), active_text, font=font, fill=text_color, stroke_width=stroke_width, stroke_fill=stroke_color)
+                return np.array(img)
+
+            return frame
+
+        # Apply filter
+        burned_clip = final_clip.fl(burn_text)
+
+        output_filename = f"final_viral_{uuid.uuid4().hex[:6]}.mp4"
+        output_path = os.path.join(temp_dir, output_filename)
+
+        burned_clip.write_videofile(output_path, codec="libx264", audio_codec="aac")
+
+        # Cleanup
+        for c in clips:
+            try: c.close()
+            except: pass
+
+        return (output_path, torch.zeros((1, 512, 512, 3)))
 
 class OracleVoiceKokoro:
     @classmethod
