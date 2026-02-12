@@ -12,3 +12,9 @@ soundfile
 edge-tts
 kokoro-onnx
 scipy
+qwen-tts
+modelscope
+accelerate
+librosa
+tensorboard
+safetensors

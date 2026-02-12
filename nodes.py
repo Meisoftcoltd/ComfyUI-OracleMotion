@@ -8,6 +8,13 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from .utils import get_temp_dir, cleanup_vram, parse_json_output, make_grid
 
+# --- IMPORTS FOR QWEN ---
+try:
+    from qwen_tts import Qwen3TTSModel
+except ImportError:
+    Qwen3TTSModel = None
+    print("⚠️ [OracleMotion] Warning: 'qwen-tts' not found. Qwen nodes will fail.")
+
 # Lazy imports
 try:
     from openai import OpenAI
@@ -639,3 +646,210 @@ class OraclePostProduction:
         for c in clips: c.close()
 
         return (out_path, torch.zeros((1,512,512,3)))
+
+# --- MERGED NODE: QWEN LOADER (FT + DEBUG + AUTO-DIR) ---
+class OracleQwenLoader:
+    @classmethod
+    def INPUT_TYPES(s):
+        import folder_paths
+
+        # 1. Define and Create Paths
+        base_tts_path = os.path.join(folder_paths.models_dir, "tts")
+        ft_dir = os.path.join(base_tts_path, "finetuned_model")
+
+        # Auto-create directories to prevent errors
+        os.makedirs(base_tts_path, exist_ok=True)
+        os.makedirs(ft_dir, exist_ok=True)
+
+        # 2. Scan for Fine-Tunes
+        ft_models = ["None (Use Base Model)"]
+        try:
+            if os.path.exists(ft_dir):
+                for item in os.listdir(ft_dir):
+                    item_path = os.path.join(ft_dir, item)
+                    if os.path.isdir(item_path):
+                        ft_models.append(item)
+                        # Scan one level deep for "Speaker/Version" structure
+                        for sub in os.listdir(item_path):
+                            if os.path.isdir(os.path.join(item_path, sub)):
+                                ft_models.append(f"{item}/{sub}")
+        except Exception as e:
+            print(f"⚠️ [OracleMotion] Error scanning fine-tunes: {e}")
+
+        return {
+            "required": {
+                "repo_id": (["Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"], {"default": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"}),
+                "fine_tuned_model": (sorted(ft_models),),
+                "precision": (["bf16", "fp16", "fp32"], {"default": "bf16"}),
+            }
+        }
+
+    RETURN_TYPES = ("QWEN_MODEL",)
+    RETURN_NAMES = ("qwen_model",)
+    FUNCTION = "load_model"
+    CATEGORY = "🪬 OracleMotion"
+
+    def load_model(self, repo_id, fine_tuned_model, precision):
+        print(f"\n[OracleMotion:Loader] 🔵 Initializing Qwen3-TTS System...")
+
+        if Qwen3TTSModel is None:
+            print(f"[OracleMotion:Loader] ❌ CRITICAL: 'qwen-tts' library missing.")
+            raise ImportError("Please install 'qwen-tts' via requirements.txt")
+
+        import folder_paths
+        import comfy.model_management as mm
+        from huggingface_hub import snapshot_download
+
+        device = mm.get_torch_device()
+        print(f"[OracleMotion:Loader] ⚙️ Device: {device} | Precision: {precision}")
+
+        # 1. Load Base Model
+        save_dir = os.path.join(folder_paths.models_dir, "tts", repo_id.split("/")[-1])
+        if not os.path.exists(save_dir):
+            print(f"[OracleMotion:Loader] ⬇️ Downloading Base Model: {repo_id}...")
+            snapshot_download(repo_id, local_dir=save_dir)
+            print(f"[OracleMotion:Loader] ✅ Download Complete.")
+
+        dtype = torch.float32
+        if precision == "bf16": dtype = torch.bfloat16
+        elif precision == "fp16": dtype = torch.float16
+
+        print(f"[OracleMotion:Loader] 🚀 Loading Base Model into VRAM...")
+        try:
+            model = Qwen3TTSModel.from_pretrained(save_dir, device_map=device, dtype=dtype)
+        except Exception as e:
+            print(f"[OracleMotion:Loader] ❌ Failed to load base model: {e}")
+            raise e
+
+        # 2. Apply Fine-Tune (If selected)
+        if fine_tuned_model != "None (Use Base Model)":
+            ft_base_path = os.path.join(folder_paths.models_dir, "tts", "finetuned_model")
+
+            # Handle path resolution
+            if "/" in fine_tuned_model:
+                parts = fine_tuned_model.split("/")
+                ckpt_path = os.path.join(ft_base_path, *parts)
+            else:
+                ckpt_path = os.path.join(ft_base_path, fine_tuned_model)
+
+            bin_file = os.path.join(ckpt_path, "pytorch_model.bin")
+
+            if os.path.exists(bin_file):
+                print(f"[OracleMotion:Loader] ♻️ Applying Fine-Tune weights: {fine_tuned_model}")
+                try:
+                    state_dict = torch.load(bin_file, map_location="cpu")
+                    keys = model.model.load_state_dict(state_dict, strict=False)
+                    print(f"[OracleMotion:Loader] ✅ Weights merged. (Missing keys: {len(keys.missing_keys)} - expected for PEFT)")
+
+                    # Inspect Config for Custom Speaker Names
+                    cfg_file = os.path.join(ckpt_path, "config.json")
+                    if os.path.exists(cfg_file):
+                        with open(cfg_file, 'r') as f:
+                            cfg_data = json.load(f)
+                            if "talker_config" in cfg_data and "spk_id" in cfg_data["talker_config"]:
+                                spk_ids = cfg_data["talker_config"]["spk_id"]
+                                print(f"[OracleMotion:Loader] ℹ️ Custom Speakers Found: {list(spk_ids.keys())}")
+                except Exception as e:
+                    print(f"[OracleMotion:Loader] ❌ Error applying fine-tune: {e}")
+            else:
+                print(f"[OracleMotion:Loader] ⚠️ Warning: pytorch_model.bin not found at {ckpt_path}")
+
+        return (model,)
+
+# --- NODE: QWEN VOICE (DEBUG ENABLED) ---
+class OracleVoiceQwen:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "storyboard_json": ("STRING", {"forceInput": True}),
+                "qwen_model": ("QWEN_MODEL",),
+                "default_gender": (["Female", "Male"], {"default": "Female"}),
+                "seed": ("INT", {"default": 42, "min": 0, "max": 0xffffffffffffffff}),
+            }
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("enhanced_json",)
+    FUNCTION = "gen_voice_qwen"
+    CATEGORY = "🪬 OracleMotion"
+
+    def gen_voice_qwen(self, storyboard_json, qwen_model, default_gender, seed):
+        import soundfile as sf
+        print(f"\n[OracleMotion:Voice] 🎙️ Starting Voice Generation Batch...")
+
+        try:
+            scenes = json.loads(storyboard_json)
+            print(f"[OracleMotion:Voice] 📄 Parsed {len(scenes)} scenes from JSON.")
+        except Exception as e:
+            print(f"[OracleMotion:Voice] ❌ JSON Parsing Error: {e}")
+            return (storyboard_json,)
+
+        temp_dir = get_temp_dir()
+
+        # Set Seed
+        print(f"[OracleMotion:Voice] 🎲 Applying Seed: {seed}")
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+
+        for i, scene in enumerate(scenes):
+            scene_id = scene.get('scene_id', i)
+            text = scene.get("dialogue", "")
+
+            print(f"--- [Scene {scene_id}] ---")
+
+            if text:
+                # 1. Construct the Acting Instruction
+                emotion = scene.get("audio_emotion", "Neutral")
+                voice_name = scene.get("voice_name", default_gender)
+                action = scene.get("action_description", "")
+
+                # Qwen VoiceDesign Prompt format
+                instruct = f"Gender: {voice_name}\nEmotion: {emotion}\nLanguage: Auto"
+                if action:
+                    instruct += f"\nContext: {action}"
+
+                print(f"[OracleMotion:Voice] 📝 Instruction:\n   Gender: {voice_name}\n   Emotion: {emotion}")
+                print(f"[OracleMotion:Voice] 🗣️ Text: \"{text[:30]}...\"")
+
+                try:
+                    # 2. Generate
+                    print(f"[OracleMotion:Voice] ⏳ Generating Audio...")
+                    wavs, sr = qwen_model.generate_voice_design(
+                        text=text,
+                        instruct=instruct,
+                        output_dir=None
+                    )
+
+                    if not wavs or len(wavs) == 0:
+                        raise ValueError("Model returned empty audio list.")
+
+                    # 3. Process Output
+                    audio_data = wavs[0]
+                    duration = len(audio_data) / sr
+                    print(f"[OracleMotion:Voice] ✅ Generated. Duration: {duration:.2f}s")
+
+                    # 4. Save
+                    fname = f"qwen_audio_{scene_id}_{uuid.uuid4().hex[:6]}.wav"
+                    fpath = os.path.join(temp_dir, fname)
+                    sf.write(fpath, audio_data, sr)
+                    print(f"[OracleMotion:Voice] 💾 Saved to: {fname}")
+
+                    # 5. Update JSON
+                    scene["audio_path"] = fpath
+                    scene["duration"] = duration + 0.2 # Slight padding
+
+                except Exception as e:
+                    print(f"[OracleMotion:Voice] ❌ Generation Error in Scene {scene_id}: {e}")
+                    print(f"[OracleMotion:Voice] ⚠️ Fallback to silent 3.0s duration.")
+                    scene["duration"] = 3.0
+            else:
+                print(f"[OracleMotion:Voice] 🔇 No dialogue detected. Skipping generation.")
+                scene["duration"] = 3.0
+
+            # VRAM Cleanup after each scene to prevent OOM
+            cleanup_vram()
+
+        print(f"[OracleMotion:Voice] 🎉 Batch Complete. Returning updated JSON.\n")
+        return (json.dumps(scenes, indent=2),)
