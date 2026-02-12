@@ -11,9 +11,13 @@ The Ultimate Audio-Driven Animation Studio for ComfyUI. Local LLMs | Local TTS |
 **🎙️ Oracle Voice** `[enhanced_json]` --> **🪬 Oracle Director** `[storyboard_json]`
 *Action: Use the Visual Timeline here to edit text or drag-and-drop reference images.*
 
-### Phase 3: The Visuals (Assets)
-**🪬 Oracle Director** `[finalized_json]` --> **🎨 Oracle Visualizer** `[storyboard_json]`
-*Input: Connect your Checkpoint (SDXL) and Base Image here.*
+### Phase 3: The Visuals (Native Art Gen)
+3.  **🪬 Oracle Director** `[finalized_json]` --> **🎨 Oracle Visualizer** `[storyboard_json]`
+4.  **ComfyUI Load Checkpoint** --> **🎨 Oracle Visualizer**
+    * `MODEL` --> `model`
+    * `CLIP` --> `clip`
+    * `VAE` --> `vae`
+    * *Tip:* You can inject LoRAs or ControlNets between the Checkpoint and the Visualizer!
 
 ### Phase 4: The Engine (Animation)
 **🎨 Oracle Visualizer** `[keyframe_paths]` --> **🎬 Oracle Engine** `[keyframe_paths]`
