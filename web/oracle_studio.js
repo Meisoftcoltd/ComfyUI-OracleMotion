@@ -10,12 +10,9 @@ app.registerExtension({
             nodeType.prototype.onNodeCreated = function () {
                 const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined;
 
-                // Add a visual hint or status widget
-                const w = this.addWidget("text", "Timeline Info", "Listening to Brain...", (v) => {}, { disabled: true });
-
-                // We hook into the execution to update the display
-                // Real-time timeline editing requires a custom DOM overlay which is complex for V1.
-                // For V1: This ensures the node registers correctly and shows status.
+                // Simple visual feedback for V1
+                // (Advanced timeline editing happens via the JSON input in this version)
+                const w = this.addWidget("text", "Status", "Studio Ready", (v) => {}, { disabled: true });
 
                 this.onResize = function(size) {
                     size[0] = Math.max(size[0], 300);
