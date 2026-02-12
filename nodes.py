@@ -224,14 +224,28 @@ class OracleDirector:
 class OracleVisualizer:
     @classmethod
     def INPUT_TYPES(s):
+        try:
+            import comfy.samplers
+            samplers = comfy.samplers.KSampler.SAMPLERS
+            schedulers = comfy.samplers.KSampler.SCHEDULERS
+        except:
+            samplers = ["euler"]
+            schedulers = ["normal"]
+
         return {
             "required": {
+                "model": ("MODEL",),
+                "clip": ("CLIP",),
+                "vae": ("VAE",),
                 "storyboard_json": ("STRING", {"forceInput": True}),
-                "sdxl_ckpt": ("STRING", {"default": "stabilityai/stable-diffusion-xl-base-1.0"}),
-                "global_style_prompt": ("STRING", {"multiline": True, "default": "Cinematic lighting, 8k"}),
-            },
-            "optional": {
-                "base_character_image": ("IMAGE",),
+                "width": ("INT", {"default": 1024}),
+                "height": ("INT", {"default": 1024}),
+                "steps": ("INT", {"default": 20}),
+                "cfg": ("FLOAT", {"default": 8.0}),
+                "sampler_name": (samplers,),
+                "scheduler": (schedulers,),
+                "global_style_prompt": ("STRING", {"multiline": True, "default": "Cinematic lighting, 8k, masterpiece"}),
+                "negative_prompt": ("STRING", {"default": "text, watermark, blurry, low quality", "multiline": True}),
             }
         }
 
@@ -240,36 +254,60 @@ class OracleVisualizer:
     FUNCTION = "generate_keyframes"
     CATEGORY = "🪬 OracleMotion"
 
-    def generate_keyframes(self, storyboard_json, sdxl_ckpt, global_style_prompt, base_character_image=None):
-        from diffusers import StableDiffusionXLPipeline
-
+    def generate_keyframes(self, model, clip, vae, storyboard_json, width, height, steps, cfg, sampler_name, scheduler, global_style_prompt, negative_prompt):
         scenes = json.loads(storyboard_json)
         temp_dir = get_temp_dir()
         keyframe_paths = []
 
-        print(f"Loading SDXL: {sdxl_ckpt}")
-        if os.path.isfile(sdxl_ckpt):
-            pipe = StableDiffusionXLPipeline.from_single_file(sdxl_ckpt, torch_dtype=torch.float16, use_safetensors=True)
-        else:
-            pipe = StableDiffusionXLPipeline.from_pretrained(sdxl_ckpt, torch_dtype=torch.float16)
-
-        pipe.enable_model_cpu_offload()
+        # 1. Pre-calculate Negative Conditioning (Static for all scenes)
+        tokens_neg = clip.tokenize(negative_prompt)
+        cond_neg = [[clip.encode_from_tokens(tokens_neg, return_pooled=True)[0], {"pooled_output": clip.encode_from_tokens(tokens_neg, return_pooled=True)[1]}]]
 
         for i, scene in enumerate(scenes):
-            prompt = f"{scene.get('visual_prompt', '')}, {scene.get('audio_emotion', '')} expression, {global_style_prompt}"
+            # 2. Construct Prompt per Scene
+            scene_prompt = scene.get('visual_prompt', '')
+            emotion = scene.get('audio_emotion', '')
+            full_prompt = f"{scene_prompt}, {emotion}, {global_style_prompt}"
 
-            # TODO: Img2Img support if base_character_image is provided could be added here
-            # For now, Text2Img
-            image = pipe(prompt=prompt, width=1024, height=1024).images[0]
+            print(f"🎨 Visualizer Generating Scene {i}: {full_prompt}")
+
+            # 3. Encode Positive
+            tokens = clip.tokenize(full_prompt)
+            cond_pos = [[clip.encode_from_tokens(tokens, return_pooled=True)[0], {"pooled_output": clip.encode_from_tokens(tokens, return_pooled=True)[1]}]]
+
+            # 4. Create Empty Latent
+            latent = torch.zeros([1, 4, height // 8, width // 8])
+
+            # 5. Sample (Standard Comfy KSampler)
+            seed = torch.randint(0, 2**32 - 1, (1,)).item()
+            try:
+                # Common KSampler Wrapper
+                samples = nodes.common_ksampler(
+                    model, seed, steps, cfg, sampler_name, scheduler,
+                    cond_pos, cond_neg, {"samples": latent}, denoise=1.0
+                )[0]["samples"]
+            except Exception as e:
+                print(f"Sampler Error: {e}")
+                continue
+
+            # 6. Decode VAE
+            pixels = vae.decode(samples) # [1, H, W, 3]
+
+            # 7. Save Image
+            # Convert Tensor to PIL
+            i_np = 255. * pixels.cpu().numpy()[0]
+            img = Image.fromarray(np.clip(i_np, 0, 255).astype(np.uint8))
 
             filename = f"keyframe_{i}_{uuid.uuid4().hex[:6]}.png"
             filepath = os.path.join(temp_dir, filename)
-            image.save(filepath)
+            img.save(filepath)
             keyframe_paths.append(filepath)
 
-        del pipe
-        cleanup_vram()
-        return (keyframe_paths, make_grid(keyframe_paths))
+            cleanup_vram()
+
+        # Generate Grid Preview
+        preview = make_grid(keyframe_paths)
+        return (keyframe_paths, preview)
 
 class OracleEngine:
     @classmethod
