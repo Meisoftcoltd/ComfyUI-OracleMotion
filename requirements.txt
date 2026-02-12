@@ -1,7 +1,12 @@
-diffusers>=0.30.0
-transformers
-accelerate
-opencv-python-headless
-moviepy
+numpy
+Pillow
 openai
 faster-whisper
+llama-cpp-python
+diffusers
+transformers
+accelerate
+soundfile
+kokoro-onnx
+moviepy
+scipy

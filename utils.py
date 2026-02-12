@@ -4,61 +4,82 @@ import uuid
 import gc
 import torch
 import re
+import numpy as np
+from PIL import Image
 
 def get_temp_dir():
-    """
-    Creates a unique temporary directory for the current batch run.
-    Follows the structure: ComfyUI/output/OracleMotion_Temp/<uuid>/
-    """
-    # Attempt to locate ComfyUI base directory
-    # Assumes this file is in ComfyUI/custom_nodes/ComfyUI-OracleMotion/utils.py
     current_dir = os.path.dirname(os.path.abspath(__file__))
+    if "custom_nodes" in current_dir:
+        base = current_dir.split("custom_nodes")[0]
+        output_dir = os.path.join(base, "output", "OracleMotion_Project_" + str(uuid.uuid4())[:8])
+    else:
+        output_dir = os.path.join(current_dir, "output")
 
-    # Traverse up to find ComfyUI root (usually 2 levels up from custom_nodes/repo)
-    # structure: root/custom_nodes/ComfyUI-OracleMotion/utils.py
-    # root is 2 levels up from the directory containing this file
-    comfy_root = os.path.dirname(os.path.dirname(current_dir))
-
-    # Verify if 'output' exists there, otherwise just use a local output folder to be safe
-    output_base = os.path.join(comfy_root, "output")
-    if not os.path.exists(output_base):
-        # Fallback if we are not in standard structure
-        output_base = os.path.join(current_dir, "output")
-
-    temp_base = os.path.join(output_base, "OracleMotion_Temp")
-    unique_run_id = str(uuid.uuid4())
-    run_dir = os.path.join(temp_base, unique_run_id)
-
-    os.makedirs(run_dir, exist_ok=True)
-    return run_dir
+    os.makedirs(output_dir, exist_ok=True)
+    return output_dir
 
 def cleanup_vram():
-    """
-    Force garbage collection and clear CUDA cache.
-    """
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
         torch.cuda.ipc_collect()
 
 def parse_json_output(text):
-    """
-    Robustly parses JSON from LLM output, handling markdown code blocks.
-    """
     try:
-        # If text contains markdown code blocks, extract the content
+        # Try to find JSON block in markdown
         match = re.search(r"```json\s*(.*?)```", text, re.DOTALL)
         if match:
             text = match.group(1)
         else:
-             # Try generic code block
+            # Try to find any code block
             match = re.search(r"```\s*(.*?)```", text, re.DOTALL)
             if match:
                 text = match.group(1)
 
+        # Clean up any potential trailing/leading whitespace or artifacts
+        text = text.strip()
         return json.loads(text)
-    except json.JSONDecodeError as e:
-        print(f"Error parsing JSON: {e}")
-        # Return empty list or raise, depending on desired behavior.
-        # Returning None to signal failure.
-        return None
+    except:
+        # Fallback: try to parse the whole text if it's raw JSON
+        try:
+            return json.loads(text)
+        except:
+            return []
+
+def load_image_from_path(path):
+    if os.path.exists(path):
+        return Image.open(path).convert("RGB")
+    return None
+
+load_image_as_pil = load_image_from_path
+
+def make_grid(keyframe_paths):
+    images = [load_image_from_path(p) for p in keyframe_paths if os.path.exists(p)]
+    if not images:
+        return torch.zeros((1, 512, 512, 3))
+
+    w, h = images[0].size
+    grid = Image.new('RGB', (w * len(images), h))
+    for i, img in enumerate(images):
+        grid.paste(img.resize((w, h)), (i * w, 0))
+
+    return torch.from_numpy(np.array(grid).astype(np.float32) / 255.0).unsqueeze(0)
+
+def get_llm_models():
+    import folder_paths
+    try:
+        models = folder_paths.get_filename_list("LLM")
+        if models:
+            return [m for m in models if m.endswith(".gguf")]
+    except:
+        pass
+    return ["Put_GGUF_In_Models_LLM_Folder.gguf"]
+
+def get_font_path():
+    current = os.path.dirname(os.path.abspath(__file__))
+    font_dir = os.path.join(current, "fonts")
+    if os.path.exists(font_dir):
+        for f in os.listdir(font_dir):
+            if f.endswith(".ttf") or f.endswith(".otf"):
+                return os.path.join(font_dir, f)
+    return "arial.ttf"
