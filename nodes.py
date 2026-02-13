@@ -105,7 +105,62 @@ Keys required per object:
 
         return (json.dumps(parsed_json, indent=2),)
 
-class OracleBrainLocal:
+class OracleSystemPrompter:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "target_duration_sec": ("INT", {"default": 60, "min": 10, "max": 300, "step": 5}),
+                "pacing": (["Slow (Dramatic)", "Normal", "Fast (Energetic)"], {"default": "Normal"}),
+                "tone": (["Dark/Thriller", "Documentary", "Comedy", "Poetic"], {"default": "Dark/Thriller"}),
+                "language": (["Spanish", "English"], {"default": "Spanish"}),
+            }
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("system_prompt_string",)
+    FUNCTION = "build_prompt"
+    CATEGORY = "🪬 OracleMotion"
+
+    def build_prompt(self, target_duration_sec, pacing, tone, language):
+        # 1. Calculate Target Word Count
+        # Avg speed: 2.5 words/sec (Normal).
+        # Slow: 2.0 w/s. Fast: 3.0 w/s.
+        speed_mult = 2.5
+        if "Slow" in pacing: speed_mult = 2.0
+        elif "Fast" in pacing: speed_mult = 3.0
+
+        target_words = int(target_duration_sec * speed_mult)
+        min_words = int(target_words * 0.9)
+        max_words = int(target_words * 1.1)
+
+        # 2. Build the Persona
+        prompt = f"""
+ROLE: You are an expert Video Director and Screenwriter.
+TASK: Write a continuous script for a single long video.
+
+TARGET DURATION: {target_duration_sec} seconds.
+WORD COUNT GOAL: You MUST write between {min_words} and {max_words} words of dialogue to fill this time.
+TONE: {tone}
+OUTPUT LANGUAGE: {language}
+
+STRUCTURE RULES:
+1. Divide the script into visual 'Shots' (Sub-scenes) to keep the video dynamic, even if it's the same location.
+2. Output strictly JSON list format: [ {{"scene_id": 1, ...}}, ... ]
+3. JSON Keys per shot:
+   - "dialogue": The spoken text ({language}). MAKE IT LONG enough to meet the word count goal.
+   - "visual_prompt": Visual description for the camera angle/action (English).
+   - "audio_emotion": Acting instruction (e.g., "Mysterious, Raspy voice").
+   - "voice_name": The character name.
+
+CRITICAL:
+- Do not summarize. Write the FULL verbatim dialogue.
+- Ensure the total dialogue length matches the {target_duration_sec} second goal (~{target_words} words).
+"""
+        print(f"[OraclePrompter] ⏱️ Configured for {target_duration_sec}s (~{target_words} words).")
+        return (prompt,)
+
+class OracleBrainWriter:
     @classmethod
     def INPUT_TYPES(s):
         from .utils import get_llm_models
@@ -113,78 +168,70 @@ class OracleBrainLocal:
         return {
             "required": {
                 "llm_model": (models if models else ["No models found"],),
-                "narrative_text": ("STRING", {"multiline": True, "default": "A cyberpunk detective walking through a rainy neon city."}),
-                "available_voices": ("STRING", {"default": "Bella, Sarul, QwenUser"}),
+                "system_prompt": ("STRING", {"forceInput": True}),
+                "user_narrative": ("STRING", {"multiline": True, "default": "Una pitonisa echando las cartas a un desconocido, prediciendo su muerte."}),
+                "available_voices": ("STRING", {"default": "Neylis"}),
                 "context_window": ("INT", {"default": 8192}),
-                "max_tokens": ("INT", {"default": 2048}),
-                "gpu_layers": ("INT", {"default": 33}),
+                "max_tokens": ("INT", {"default": 4096}),
+                "gpu_layers": ("INT", {"default": 33, "min": 0, "max": 100}),
                 "temperature": ("FLOAT", {"default": 0.7}),
-            },
-            "optional": {
-                "system_prompt": ("STRING", {"multiline": True, "default": "You are a Director. Output a strict JSON list."}),
             }
         }
 
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("storyboard_json",)
-    FUNCTION = "generate_storyboard_local"
+    FUNCTION = "write_script"
     CATEGORY = "🪬 OracleMotion"
 
-    def generate_storyboard_local(self, llm_model, narrative_text, available_voices, context_window, max_tokens, gpu_layers, temperature, system_prompt=""):
+    def write_script(self, llm_model, system_prompt, user_narrative, available_voices, context_window, max_tokens, gpu_layers, temperature):
         try:
             from llama_cpp import Llama
         except ImportError:
             raise ImportError("llama-cpp-python is required.")
 
-        # Locate Model
         model_path = folder_paths.get_full_path("LLM", llm_model)
         if not model_path:
-             # Fallback manual check
              base_path = os.path.join(folder_paths.models_dir, "LLM")
              model_path = os.path.join(base_path, llm_model)
 
-        if not os.path.exists(model_path):
-            raise RuntimeError(f"Model not found: {model_path}")
+        print(f"[OracleWriter] 🧠 Generating Script (GPU Layers: {gpu_layers})...")
 
-        print(f"Loading Local LLM: {model_path}")
-        llm = Llama(
-            model_path=model_path,
-            n_ctx=context_window,
-            n_gpu_layers=gpu_layers,
-            verbose=False
-        )
+        # Initialize with user-defined GPU layers
+        llm = Llama(model_path=model_path, n_ctx=context_window, n_gpu_layers=gpu_layers, verbose=False)
 
-        FULL_SYSTEM_PROMPT = f"""
+        final_user_prompt = f"""
+SYSTEM INSTRUCTIONS:
 {system_prompt}
-Convert narrative to JSON storyboard.
-Available Voices: {available_voices}
-Required Keys: scene_id, dialogue, audio_emotion, voice_name, visual_prompt, action_description.
-Output ONLY JSON.
+
+ACTORS AVAILABLE: {available_voices}
+
+STORY IDEA:
+{user_narrative}
+
+WRITE THE JSON SCRIPT NOW:
 """
-
-        # Simple Prompt Template
-        prompt = f"System: {FULL_SYSTEM_PROMPT}\nUser: {narrative_text}\nAssistant:"
-
         try:
             response = llm.create_chat_completion(
-                messages=[
-                    {"role": "system", "content": FULL_SYSTEM_PROMPT},
-                    {"role": "user", "content": narrative_text}
-                ],
+                messages=[{"role": "user", "content": final_user_prompt}],
                 max_tokens=max_tokens,
                 temperature=temperature,
                 response_format={"type": "json_object"}
             )
             content = response["choices"][0]["message"]["content"]
-        except:
-            # Fallback
-            response = llm(prompt, max_tokens=max_tokens, temperature=temperature)
-            content = response["choices"][0]["text"]
+            parsed = parse_json_output(content)
 
-        parsed_json = parse_json_output(content)
+            # Validation: Ensure it's a list
+            if isinstance(parsed, dict): parsed = [parsed]
+
+            print(f"[OracleWriter] ✅ Generated {len(parsed)} shots.")
+
+        except Exception as e:
+            print(f"[OracleWriter] ❌ Error: {e}")
+            parsed = []
+
         del llm
         cleanup_vram()
-        return (json.dumps(parsed_json, indent=2),)
+        return (json.dumps(parsed, indent=2),)
 
 class OracleDirector:
     @classmethod

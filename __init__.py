@@ -1,5 +1,6 @@
 from .nodes import (
-    OracleBrainAPI, OracleBrainLocal,
+    OracleSystemPrompter, OracleBrainWriter,
+    OracleBrainAPI,
     OracleDirector, OracleVisualizer,
     OracleEngine, OraclePostProduction,
     OracleVoiceKokoro, OracleVoiceInjector,
@@ -9,8 +10,9 @@ from .nodes import (
 WEB_DIRECTORY = "./web"
 
 NODE_CLASS_MAPPINGS = {
+    "OracleSystemPrompter": OracleSystemPrompter,
+    "OracleBrainWriter": OracleBrainWriter,
     "OracleBrainAPI": OracleBrainAPI,
-    "OracleBrainLocal": OracleBrainLocal,
     "OracleVoiceKokoro": OracleVoiceKokoro,
     "OracleVoiceInjector": OracleVoiceInjector,
     "OracleQwenLoader": OracleQwenLoader,
@@ -22,7 +24,8 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "OracleBrainLocal": "🧠 Oracle Brain (Local Director)",
+    "OracleSystemPrompter": "⚙️ Oracle System Config (Timer)",
+    "OracleBrainWriter": "🧠 Oracle Brain (Writer)",
     "OracleBrainAPI": "🧠 Oracle Brain (Cloud API)",
     "OracleVoiceKokoro": "🎙️ Oracle Voice (Kokoro v0.19)",
     "OracleVoiceQwen": "🎙️ Oracle Voice (Qwen3 Emotion)",
