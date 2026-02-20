@@ -6,7 +6,7 @@ import nodes
 import folder_paths
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
-from .utils import get_temp_dir, cleanup_vram, parse_json_output, make_grid
+from .utils import get_temp_dir, cleanup_vram, parse_json_output, make_grid, validate_path
 
 # --- IMPORTS FOR QWEN ---
 try:
@@ -141,10 +141,10 @@ class OracleBrainLocal:
         if not model_path:
              # Fallback manual check
              base_path = os.path.join(folder_paths.models_dir, "LLM")
-             model_path = os.path.join(base_path, llm_model)
+             model_path = validate_path(base_path, llm_model)
 
-        if not os.path.exists(model_path):
-            raise RuntimeError(f"Model not found: {model_path}")
+        if not model_path or not os.path.exists(model_path):
+            raise RuntimeError(f"Model not found: {model_path if model_path else llm_model}")
 
         print(f"Loading Local LLM: {model_path}")
         llm = Llama(
@@ -728,9 +728,13 @@ class OracleQwenLoader:
             # Handle path resolution
             if "/" in fine_tuned_model:
                 parts = fine_tuned_model.split("/")
-                ckpt_path = os.path.join(ft_base_path, *parts)
+                ckpt_path = validate_path(ft_base_path, os.path.join(*parts))
             else:
-                ckpt_path = os.path.join(ft_base_path, fine_tuned_model)
+                ckpt_path = validate_path(ft_base_path, fine_tuned_model)
+
+            if not ckpt_path:
+                print(f"[OracleMotion:Loader] ❌ Invalid fine-tune path or traversal attempt: {fine_tuned_model}")
+                return (model,)
 
             bin_file = os.path.join(ckpt_path, "pytorch_model.bin")
 
