@@ -83,3 +83,11 @@ def get_font_path():
             if f.endswith(".ttf") or f.endswith(".otf"):
                 return os.path.join(font_dir, f)
     return "arial.ttf"
+
+def validate_path(base_dir, filename):
+    import os
+    base_abs = os.path.abspath(base_dir)
+    full_path = os.path.abspath(os.path.join(base_abs, filename))
+    if os.path.commonpath([base_abs, full_path]) == base_abs:
+        return full_path
+    return None
