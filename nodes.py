@@ -6,7 +6,13 @@ import nodes
 import folder_paths
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
-from .utils import get_temp_dir, cleanup_vram, parse_json_output, make_grid, validate_path
+from .utils import (
+    get_temp_dir,
+    cleanup_vram,
+    parse_json_output,
+    make_grid,
+    validate_path,
+)
 
 # --- IMPORTS FOR QWEN ---
 try:
@@ -26,12 +32,19 @@ try:
 except ImportError:
     WhisperModel = None
 
+
 class OracleBrainAPI:
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": {
-                "narrative_text": ("STRING", {"multiline": True, "default": "A cyberpunk detective walking through a rainy neon city."}),
+                "narrative_text": (
+                    "STRING",
+                    {
+                        "multiline": True,
+                        "default": "A cyberpunk detective walking through a rainy neon city.",
+                    },
+                ),
                 "available_voices": ("STRING", {"default": "Bella, Sarul, QwenUser"}),
                 "model_name": ("STRING", {"default": "gpt-4-turbo"}),
                 "base_url": ("STRING", {"default": "https://api.openai.com/v1"}),
@@ -39,8 +52,14 @@ class OracleBrainAPI:
             },
             "optional": {
                 "audio_path": ("STRING", {"default": ""}),
-                "system_prompt": ("STRING", {"multiline": True, "default": "You are a Director. Output a strict JSON list."}),
-            }
+                "system_prompt": (
+                    "STRING",
+                    {
+                        "multiline": True,
+                        "default": "You are a Director. Output a strict JSON list.",
+                    },
+                ),
+            },
         }
 
     RETURN_TYPES = ("STRING",)
@@ -48,7 +67,16 @@ class OracleBrainAPI:
     FUNCTION = "generate_storyboard"
     CATEGORY = "🪬 OracleMotion"
 
-    def generate_storyboard(self, narrative_text, available_voices, model_name, base_url, api_key, audio_path="", system_prompt=""):
+    def generate_storyboard(
+        self,
+        narrative_text,
+        available_voices,
+        model_name,
+        base_url,
+        api_key,
+        audio_path="",
+        system_prompt="",
+    ):
         text_input = narrative_text
 
         # 1. Audio Transcription
@@ -59,7 +87,11 @@ class OracleBrainAPI:
                 try:
                     print(f"Transcribing {audio_path}...")
                     device = "cuda" if torch.cuda.is_available() else "cpu"
-                    model = WhisperModel("base", device=device, compute_type="float16" if device=="cuda" else "int8")
+                    model = WhisperModel(
+                        "base",
+                        device=device,
+                        compute_type="float16" if device == "cuda" else "int8",
+                    )
                     segments, _ = model.transcribe(audio_path)
                     transcribed_text = " ".join([segment.text for segment in segments])
                     text_input += "\n\nAudio Transcript: " + transcribed_text
@@ -94,8 +126,8 @@ Keys required per object:
                 model=model_name,
                 messages=[
                     {"role": "system", "content": FULL_SYSTEM_PROMPT},
-                    {"role": "user", "content": text_input}
-                ]
+                    {"role": "user", "content": text_input},
+                ],
             )
             content = response.choices[0].message.content
             parsed_json = parse_json_output(content)
@@ -105,15 +137,23 @@ Keys required per object:
 
         return (json.dumps(parsed_json, indent=2),)
 
+
 class OracleBrainLocal:
     @classmethod
     def INPUT_TYPES(s):
         from .utils import get_llm_models
+
         models = get_llm_models()
         return {
             "required": {
                 "llm_model": (models if models else ["No models found"],),
-                "narrative_text": ("STRING", {"multiline": True, "default": "A cyberpunk detective walking through a rainy neon city."}),
+                "narrative_text": (
+                    "STRING",
+                    {
+                        "multiline": True,
+                        "default": "A cyberpunk detective walking through a rainy neon city.",
+                    },
+                ),
                 "available_voices": ("STRING", {"default": "Bella, Sarul, QwenUser"}),
                 "context_window": ("INT", {"default": 8192}),
                 "max_tokens": ("INT", {"default": 2048}),
@@ -121,8 +161,14 @@ class OracleBrainLocal:
                 "temperature": ("FLOAT", {"default": 0.7}),
             },
             "optional": {
-                "system_prompt": ("STRING", {"multiline": True, "default": "You are a Director. Output a strict JSON list."}),
-            }
+                "system_prompt": (
+                    "STRING",
+                    {
+                        "multiline": True,
+                        "default": "You are a Director. Output a strict JSON list.",
+                    },
+                ),
+            },
         }
 
     RETURN_TYPES = ("STRING",)
@@ -130,7 +176,17 @@ class OracleBrainLocal:
     FUNCTION = "generate_storyboard_local"
     CATEGORY = "🪬 OracleMotion"
 
-    def generate_storyboard_local(self, llm_model, narrative_text, available_voices, context_window, max_tokens, gpu_layers, temperature, system_prompt=""):
+    def generate_storyboard_local(
+        self,
+        llm_model,
+        narrative_text,
+        available_voices,
+        context_window,
+        max_tokens,
+        gpu_layers,
+        temperature,
+        system_prompt="",
+    ):
         try:
             from llama_cpp import Llama
         except ImportError:
@@ -139,19 +195,21 @@ class OracleBrainLocal:
         # Locate Model
         model_path = folder_paths.get_full_path("LLM", llm_model)
         if not model_path:
-             # Fallback manual check
-             base_path = os.path.join(folder_paths.models_dir, "LLM")
-             model_path = validate_path(base_path, llm_model)
+            # Fallback manual check
+            base_path = os.path.join(folder_paths.models_dir, "LLM")
+            model_path = validate_path(base_path, llm_model)
 
         if not model_path or not os.path.exists(model_path):
-            raise RuntimeError(f"Model not found: {model_path if model_path else llm_model}")
+            raise RuntimeError(
+                f"Model not found: {model_path if model_path else llm_model}"
+            )
 
         print(f"Loading Local LLM: {model_path}")
         llm = Llama(
             model_path=model_path,
             n_ctx=context_window,
             n_gpu_layers=gpu_layers,
-            verbose=False
+            verbose=False,
         )
 
         FULL_SYSTEM_PROMPT = f"""
@@ -169,11 +227,11 @@ Output ONLY JSON.
             response = llm.create_chat_completion(
                 messages=[
                     {"role": "system", "content": FULL_SYSTEM_PROMPT},
-                    {"role": "user", "content": narrative_text}
+                    {"role": "user", "content": narrative_text},
                 ],
                 max_tokens=max_tokens,
                 temperature=temperature,
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
             )
             content = response["choices"][0]["message"]["content"]
         except:
@@ -186,16 +244,13 @@ Output ONLY JSON.
         cleanup_vram()
         return (json.dumps(parsed_json, indent=2),)
 
+
 class OracleDirector:
     @classmethod
     def INPUT_TYPES(s):
         return {
-            "required": {
-                "storyboard_json": ("STRING", {"forceInput": True})
-            },
-            "hidden": {
-                "user_edits": ("STRING", {"default": "[]"})
-            }
+            "required": {"storyboard_json": ("STRING", {"forceInput": True})},
+            "hidden": {"user_edits": ("STRING", {"default": "[]"})},
         }
 
     RETURN_TYPES = ("STRING",)
@@ -204,35 +259,45 @@ class OracleDirector:
     CATEGORY = "🪬 OracleMotion"
 
     def direct_scenes(self, storyboard_json, user_edits="[]"):
-        try: ai_scenes = json.loads(storyboard_json)
-        except: ai_scenes = []
-        try: user_scenes = json.loads(user_edits)
-        except: user_scenes = []
+        try:
+            ai_scenes = json.loads(storyboard_json)
+        except:
+            ai_scenes = []
+        try:
+            user_scenes = json.loads(user_edits)
+        except:
+            user_scenes = []
 
         final_scenes = user_scenes if user_scenes else ai_scenes
 
         # Validation & Normalization
         validated = []
         for i, s in enumerate(final_scenes):
-            validated.append({
-                "scene_id": s.get("scene_id", i),
-                "dialogue": s.get("dialogue", ""),
-                "audio_emotion": s.get("audio_emotion", ""),
-                "voice_name": s.get("voice_name", ""),
-                "visual_prompt": s.get("visual_prompt", s.get("prompt", "")),
-                "action_description": s.get("action_description", s.get("action", "")),
-                "reference_path": s.get("reference_path", ""),
-                "duration": s.get("duration", 3.0), # Important for Engine
-                "audio_path": s.get("audio_path", "")
-            })
+            validated.append(
+                {
+                    "scene_id": s.get("scene_id", i),
+                    "dialogue": s.get("dialogue", ""),
+                    "audio_emotion": s.get("audio_emotion", ""),
+                    "voice_name": s.get("voice_name", ""),
+                    "visual_prompt": s.get("visual_prompt", s.get("prompt", "")),
+                    "action_description": s.get(
+                        "action_description", s.get("action", "")
+                    ),
+                    "reference_path": s.get("reference_path", ""),
+                    "duration": s.get("duration", 3.0),  # Important for Engine
+                    "audio_path": s.get("audio_path", ""),
+                }
+            )
 
         return (json.dumps(validated, indent=2),)
+
 
 class OracleVisualizer:
     @classmethod
     def INPUT_TYPES(s):
         try:
             import comfy.samplers
+
             samplers = comfy.samplers.KSampler.SAMPLERS
             schedulers = comfy.samplers.KSampler.SCHEDULERS
         except:
@@ -251,8 +316,20 @@ class OracleVisualizer:
                 "cfg": ("FLOAT", {"default": 8.0}),
                 "sampler_name": (samplers,),
                 "scheduler": (schedulers,),
-                "global_style_prompt": ("STRING", {"multiline": True, "default": "Cinematic lighting, 8k, masterpiece"}),
-                "negative_prompt": ("STRING", {"default": "text, watermark, blurry, low quality", "multiline": True}),
+                "global_style_prompt": (
+                    "STRING",
+                    {
+                        "multiline": True,
+                        "default": "Cinematic lighting, 8k, masterpiece",
+                    },
+                ),
+                "negative_prompt": (
+                    "STRING",
+                    {
+                        "default": "text, watermark, blurry, low quality",
+                        "multiline": True,
+                    },
+                ),
             }
         }
 
@@ -261,26 +338,58 @@ class OracleVisualizer:
     FUNCTION = "generate_keyframes"
     CATEGORY = "🪬 OracleMotion"
 
-    def generate_keyframes(self, model, clip, vae, storyboard_json, width, height, steps, cfg, sampler_name, scheduler, global_style_prompt, negative_prompt):
+    def generate_keyframes(
+        self,
+        model,
+        clip,
+        vae,
+        storyboard_json,
+        width,
+        height,
+        steps,
+        cfg,
+        sampler_name,
+        scheduler,
+        global_style_prompt,
+        negative_prompt,
+    ):
         scenes = json.loads(storyboard_json)
         temp_dir = get_temp_dir()
         keyframe_paths = []
 
         # 1. Pre-calculate Negative Conditioning (Static for all scenes)
         tokens_neg = clip.tokenize(negative_prompt)
-        cond_neg = [[clip.encode_from_tokens(tokens_neg, return_pooled=True)[0], {"pooled_output": clip.encode_from_tokens(tokens_neg, return_pooled=True)[1]}]]
+        cond_neg = [
+            [
+                clip.encode_from_tokens(tokens_neg, return_pooled=True)[0],
+                {
+                    "pooled_output": clip.encode_from_tokens(
+                        tokens_neg, return_pooled=True
+                    )[1]
+                },
+            ]
+        ]
 
         for i, scene in enumerate(scenes):
             # 2. Construct Prompt per Scene
-            scene_prompt = scene.get('visual_prompt', '')
-            emotion = scene.get('audio_emotion', '')
+            scene_prompt = scene.get("visual_prompt", "")
+            emotion = scene.get("audio_emotion", "")
             full_prompt = f"{scene_prompt}, {emotion}, {global_style_prompt}"
 
             print(f"🎨 Visualizer Generating Scene {i}: {full_prompt}")
 
             # 3. Encode Positive
             tokens = clip.tokenize(full_prompt)
-            cond_pos = [[clip.encode_from_tokens(tokens, return_pooled=True)[0], {"pooled_output": clip.encode_from_tokens(tokens, return_pooled=True)[1]}]]
+            cond_pos = [
+                [
+                    clip.encode_from_tokens(tokens, return_pooled=True)[0],
+                    {
+                        "pooled_output": clip.encode_from_tokens(
+                            tokens, return_pooled=True
+                        )[1]
+                    },
+                ]
+            ]
 
             # 4. Create Empty Latent
             latent = torch.zeros([1, 4, height // 8, width // 8])
@@ -290,19 +399,27 @@ class OracleVisualizer:
             try:
                 # Common KSampler Wrapper
                 samples = nodes.common_ksampler(
-                    model, seed, steps, cfg, sampler_name, scheduler,
-                    cond_pos, cond_neg, {"samples": latent}, denoise=1.0
+                    model,
+                    seed,
+                    steps,
+                    cfg,
+                    sampler_name,
+                    scheduler,
+                    cond_pos,
+                    cond_neg,
+                    {"samples": latent},
+                    denoise=1.0,
                 )[0]["samples"]
             except Exception as e:
                 print(f"Sampler Error: {e}")
                 continue
 
             # 6. Decode VAE
-            pixels = vae.decode(samples) # [1, H, W, 3]
+            pixels = vae.decode(samples)  # [1, H, W, 3]
 
             # 7. Save Image
             # Convert Tensor to PIL
-            i_np = 255. * pixels.cpu().numpy()[0]
+            i_np = 255.0 * pixels.cpu().numpy()[0]
             img = Image.fromarray(np.clip(i_np, 0, 255).astype(np.uint8))
 
             filename = f"keyframe_{i}_{uuid.uuid4().hex[:6]}.png"
@@ -316,11 +433,13 @@ class OracleVisualizer:
         preview = make_grid(keyframe_paths)
         return (keyframe_paths, preview)
 
+
 class OracleEngine:
     @classmethod
     def INPUT_TYPES(s):
         try:
             import comfy.samplers
+
             samplers = comfy.samplers.KSampler.SAMPLERS
             schedulers = comfy.samplers.KSampler.SCHEDULERS
         except:
@@ -343,9 +462,15 @@ class OracleEngine:
                 "motion_strength": ("FLOAT", {"default": 1.0}),
             },
             "optional": {
-                "positive": ("STRING", {"default": "high quality motion", "multiline": True}),
-                "negative": ("STRING", {"default": "static, watermark", "multiline": True}),
-            }
+                "positive": (
+                    "STRING",
+                    {"default": "high quality motion", "multiline": True},
+                ),
+                "negative": (
+                    "STRING",
+                    {"default": "static, watermark", "multiline": True},
+                ),
+            },
         }
 
     RETURN_TYPES = ("LIST",)
@@ -353,19 +478,53 @@ class OracleEngine:
     FUNCTION = "animate_scenes"
     CATEGORY = "🪬 OracleMotion"
 
-    def animate_scenes(self, model, vae, clip, keyframe_paths, storyboard_json, fps, steps, cfg, sampler_name, scheduler, denoise, motion_strength, positive, negative):
+    def animate_scenes(
+        self,
+        model,
+        vae,
+        clip,
+        keyframe_paths,
+        storyboard_json,
+        fps,
+        steps,
+        cfg,
+        sampler_name,
+        scheduler,
+        denoise,
+        motion_strength,
+        positive,
+        negative,
+    ):
         from diffusers.utils import export_to_video
+
         scenes = json.loads(storyboard_json)
         temp_dir = get_temp_dir()
         video_paths = []
 
         # Conditioning
         tokens = clip.tokenize(positive)
-        cond_pos = [[clip.encode_from_tokens(tokens, return_pooled=True)[0], {"pooled_output": clip.encode_from_tokens(tokens, return_pooled=True)[1]}]]
+        cond_pos = [
+            [
+                clip.encode_from_tokens(tokens, return_pooled=True)[0],
+                {
+                    "pooled_output": clip.encode_from_tokens(
+                        tokens, return_pooled=True
+                    )[1]
+                },
+            ]
+        ]
         tokens_neg = clip.tokenize(negative)
-        cond_neg = [[clip.encode_from_tokens(tokens_neg, return_pooled=True)[0], {"pooled_output": clip.encode_from_tokens(tokens_neg, return_pooled=True)[1]}]]
+        cond_neg = [
+            [
+                clip.encode_from_tokens(tokens_neg, return_pooled=True)[0],
+                {
+                    "pooled_output": clip.encode_from_tokens(
+                        tokens_neg, return_pooled=True
+                    )[1]
+                },
+            ]
+        ]
 
-        last_latent = None
 
         for i, path in enumerate(keyframe_paths):
             duration = scenes[i].get("duration", 4.0) if i < len(scenes) else 4.0
@@ -375,11 +534,13 @@ class OracleEngine:
             w, h = img.size
             w, h = (w // 8) * 8, (h // 8) * 8
             img = img.resize((w, h))
-            img_tensor = torch.from_numpy(np.array(img).astype(np.float32) / 255.0).unsqueeze(0)
+            img_tensor = torch.from_numpy(
+                np.array(img).astype(np.float32) / 255.0
+            ).unsqueeze(0)
 
             # Encode VAE Safe
             try:
-                latent = vae.encode(img_tensor[:,:,:,:3]) # [1, 4, H/8, W/8]
+                latent = vae.encode(img_tensor[:, :, :, :3])  # [1, 4, H/8, W/8]
             except:
                 latent = vae.encode(img_tensor)
 
@@ -390,17 +551,26 @@ class OracleEngine:
             # Sample
             seed = torch.randint(0, 2**32 - 1, (1,)).item()
             samples = nodes.common_ksampler(
-                model, seed, steps, cfg, sampler_name, scheduler,
-                cond_pos, cond_neg, {"samples": lat_batch}, denoise=denoise
+                model,
+                seed,
+                steps,
+                cfg,
+                sampler_name,
+                scheduler,
+                cond_pos,
+                cond_neg,
+                {"samples": lat_batch},
+                denoise=denoise,
             )[0]["samples"]
 
             # Decode
-            pixels = vae.decode(samples) # [F, H, W, 3]
+            pixels = vae.decode(samples)  # [F, H, W, 3]
 
             # Save
             frames = []
-            for f in range(pixels.shape[0]):
-                p = (pixels[f].cpu().numpy() * 255).astype(np.uint8)
+            pixels_np = pixels.cpu().numpy()
+            for f in range(pixels_np.shape[0]):
+                p = (pixels_np[f] * 255).astype(np.uint8)
                 frames.append(Image.fromarray(p))
 
             out_name = f"scene_{i}_{uuid.uuid4().hex[:6]}.mp4"
@@ -412,14 +582,12 @@ class OracleEngine:
 
         return (video_paths,)
 
+
 class OracleVoiceKokoro:
     @classmethod
     def INPUT_TYPES(s):
-        return {
-            "required": {
-                "storyboard_json": ("STRING", {"forceInput": True})
-            }
-        }
+        return {"required": {"storyboard_json": ("STRING", {"forceInput": True})}}
+
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("enhanced_json",)
     FUNCTION = "gen_voice"
@@ -427,10 +595,10 @@ class OracleVoiceKokoro:
 
     def gen_voice(self, storyboard_json):
         try:
-             import soundfile as sf
-             from kokoro_onnx import Kokoro
+            import soundfile as sf
+            from kokoro_onnx import Kokoro
         except ImportError:
-             raise ImportError("Missing requirements: soundfile, kokoro-onnx")
+            raise ImportError("Missing requirements: soundfile, kokoro-onnx")
 
         scenes = json.loads(storyboard_json)
         temp_dir = get_temp_dir()
@@ -441,8 +609,8 @@ class OracleVoiceKokoro:
         voices_path = os.path.join(base_kokoro, "voices.json")
 
         if not os.path.exists(model_path):
-             print(f"Kokoro not found at {model_path}. Please download it.")
-             return (storyboard_json,)
+            print(f"Kokoro not found at {model_path}. Please download it.")
+            return (storyboard_json,)
 
         kokoro = Kokoro(model_path, voices_path)
 
@@ -459,7 +627,7 @@ class OracleVoiceKokoro:
                     sf.write(fpath, samples, sample_rate)
 
                     scene["audio_path"] = fpath
-                    scene["duration"] = duration + 0.5 # Padding
+                    scene["duration"] = duration + 0.5  # Padding
                 except Exception as e:
                     print(f"Voice Gen Error: {e}")
                     scene["duration"] = 4.0
@@ -467,6 +635,7 @@ class OracleVoiceKokoro:
                 scene["duration"] = 4.0
 
         return (json.dumps(scenes, indent=2),)
+
 
 class OracleVoiceInjector:
     @classmethod
@@ -477,6 +646,7 @@ class OracleVoiceInjector:
                 "audio_batch": ("AUDIO",),
             }
         }
+
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("enhanced_json",)
     FUNCTION = "inject"
@@ -492,14 +662,16 @@ class OracleVoiceInjector:
 
         import soundfile as sf
 
-        for i, scene in enumerate(scenes):
-            if i < waveforms.shape[0]:
-                clip = waveforms[i]
-                # Robust Mono/Stereo
-                if clip.dim() == 1:
-                    clip = clip.unsqueeze(0)
+        waveforms_np = waveforms.cpu().numpy()
 
-                audio_np = clip.cpu().numpy().T
+        for i, scene in enumerate(scenes):
+            if i < waveforms_np.shape[0]:
+                clip = waveforms_np[i]
+                # Robust Mono/Stereo
+                if clip.ndim == 1:
+                    clip = np.expand_dims(clip, axis=0)
+
+                audio_np = clip.T
                 duration = audio_np.shape[0] / sr
 
                 fname = f"injected_{i}_{uuid.uuid4().hex[:6]}.wav"
@@ -513,10 +685,12 @@ class OracleVoiceInjector:
 
         return (json.dumps(scenes, indent=2),)
 
+
 class OraclePostProduction:
     @classmethod
     def INPUT_TYPES(s):
         from .utils import get_font_path
+
         return {
             "required": {
                 "enhanced_storyboard_json": ("STRING", {"forceInput": True}),
@@ -530,7 +704,7 @@ class OraclePostProduction:
                 "video_paths": ("LIST",),
                 "preview_background": ("IMAGE",),
                 "font_path": ("STRING", {"default": get_font_path()}),
-            }
+            },
         }
 
     RETURN_TYPES = ("STRING", "IMAGE")
@@ -539,7 +713,18 @@ class OraclePostProduction:
     CATEGORY = "🪬 OracleMotion"
     OUTPUT_NODE = True
 
-    def process(self, enhanced_storyboard_json, font_size, font_color, stroke_width, position_y, preview_mode, video_paths=None, preview_background=None, font_path=None):
+    def process(
+        self,
+        enhanced_storyboard_json,
+        font_size,
+        font_color,
+        stroke_width,
+        position_y,
+        preview_mode,
+        video_paths=None,
+        preview_background=None,
+        font_path=None,
+    ):
         scenes = json.loads(enhanced_storyboard_json)
 
         # Setup Font
@@ -563,8 +748,10 @@ class OraclePostProduction:
             W, H = 1080, 1920
             if preview_background is not None:
                 # Comfy [1, H, W, 3]
-                i = 255. * preview_background[0].cpu().numpy()
-                img = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8)).convert("RGB")
+                i = 255.0 * preview_background[0].cpu().numpy()
+                img = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8)).convert(
+                    "RGB"
+                )
                 W, H = img.size
             else:
                 img = Image.new("RGB", (W, H), (0, 0, 0))
@@ -582,9 +769,18 @@ class OraclePostProduction:
             x = (W - tw) / 2
             y = H - position_y - th
 
-            draw.text((x, y), text, font=font, fill=font_color, stroke_width=stroke_width, stroke_fill="black")
+            draw.text(
+                (x, y),
+                text,
+                font=font,
+                fill=font_color,
+                stroke_width=stroke_width,
+                stroke_fill="black",
+            )
 
-            res = torch.from_numpy(np.array(img).astype(np.float32) / 255.0).unsqueeze(0)
+            res = torch.from_numpy(np.array(img).astype(np.float32) / 255.0).unsqueeze(
+                0
+            )
             return ("", res)
 
         # --- RENDER ---
@@ -603,7 +799,8 @@ class OraclePostProduction:
                             clip = clip.set_duration(aclip.duration)
                 clips.append(clip)
 
-        if not clips: return ("", torch.zeros((1,512,512,3)))
+        if not clips:
+            return ("", torch.zeros((1, 512, 512, 3)))
 
         final = concatenate_videoclips(clips, method="compose")
 
@@ -613,7 +810,7 @@ class OraclePostProduction:
         for i, c in enumerate(clips):
             txt = scenes[i].get("dialogue", "")
             if txt:
-                captions.append({"start": curr, "end": curr+c.duration, "text": txt})
+                captions.append({"start": curr, "end": curr + c.duration, "text": txt})
             curr += c.duration
 
         def burn(get_frame, t):
@@ -631,7 +828,14 @@ class OraclePostProduction:
                 tw, th = get_text_size(draw, active, font)
                 x = (W - tw) / 2
                 y = H - position_y - th
-                draw.text((x, y), active, font=font, fill=font_color, stroke_width=stroke_width, stroke_fill="black")
+                draw.text(
+                    (x, y),
+                    active,
+                    font=font,
+                    fill=font_color,
+                    stroke_width=stroke_width,
+                    stroke_fill="black",
+                )
                 return np.array(img)
             return frame
 
@@ -640,12 +844,21 @@ class OraclePostProduction:
         out_name = f"viral_{uuid.uuid4().hex[:6]}.mp4"
         out_path = os.path.join(get_temp_dir(), out_name)
 
-        final_burned.write_videofile(out_path, fps=24, codec="libx264", audio_codec="aac", temp_audiofile="temp-audio.m4a", remove_temp=True)
+        final_burned.write_videofile(
+            out_path,
+            fps=24,
+            codec="libx264",
+            audio_codec="aac",
+            temp_audiofile="temp-audio.m4a",
+            remove_temp=True,
+        )
 
         final.close()
-        for c in clips: c.close()
+        for c in clips:
+            c.close()
 
-        return (out_path, torch.zeros((1,512,512,3)))
+        return (out_path, torch.zeros((1, 512, 512, 3)))
+
 
 # --- MERGED NODE: QWEN LOADER (FT + DEBUG + AUTO-DIR) ---
 class OracleQwenLoader:
@@ -678,7 +891,10 @@ class OracleQwenLoader:
 
         return {
             "required": {
-                "repo_id": (["Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"], {"default": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"}),
+                "repo_id": (
+                    ["Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"],
+                    {"default": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"},
+                ),
                 "fine_tuned_model": (sorted(ft_models),),
                 "precision": (["bf16", "fp16", "fp32"], {"default": "bf16"}),
             }
@@ -690,10 +906,10 @@ class OracleQwenLoader:
     CATEGORY = "🪬 OracleMotion"
 
     def load_model(self, repo_id, fine_tuned_model, precision):
-        print(f"\n[OracleMotion:Loader] 🔵 Initializing Qwen3-TTS System...")
+        print("\n[OracleMotion:Loader] 🔵 Initializing Qwen3-TTS System...")
 
         if Qwen3TTSModel is None:
-            print(f"[OracleMotion:Loader] ❌ CRITICAL: 'qwen-tts' library missing.")
+            print("[OracleMotion:Loader] ❌ CRITICAL: 'qwen-tts' library missing.")
             raise ImportError("Please install 'qwen-tts' via requirements.txt")
 
         import folder_paths
@@ -708,22 +924,28 @@ class OracleQwenLoader:
         if not os.path.exists(save_dir):
             print(f"[OracleMotion:Loader] ⬇️ Downloading Base Model: {repo_id}...")
             snapshot_download(repo_id, local_dir=save_dir)
-            print(f"[OracleMotion:Loader] ✅ Download Complete.")
+            print("[OracleMotion:Loader] ✅ Download Complete.")
 
         dtype = torch.float32
-        if precision == "bf16": dtype = torch.bfloat16
-        elif precision == "fp16": dtype = torch.float16
+        if precision == "bf16":
+            dtype = torch.bfloat16
+        elif precision == "fp16":
+            dtype = torch.float16
 
-        print(f"[OracleMotion:Loader] 🚀 Loading Base Model into VRAM...")
+        print("[OracleMotion:Loader] 🚀 Loading Base Model into VRAM...")
         try:
-            model = Qwen3TTSModel.from_pretrained(save_dir, device_map=device, dtype=dtype)
+            model = Qwen3TTSModel.from_pretrained(
+                save_dir, device_map=device, dtype=dtype
+            )
         except Exception as e:
             print(f"[OracleMotion:Loader] ❌ Failed to load base model: {e}")
             raise e
 
         # 2. Apply Fine-Tune (If selected)
         if fine_tuned_model != "None (Use Base Model)":
-            ft_base_path = os.path.join(folder_paths.models_dir, "tts", "finetuned_model")
+            ft_base_path = os.path.join(
+                folder_paths.models_dir, "tts", "finetuned_model"
+            )
 
             # Handle path resolution
             if "/" in fine_tuned_model:
@@ -733,32 +955,46 @@ class OracleQwenLoader:
                 ckpt_path = validate_path(ft_base_path, fine_tuned_model)
 
             if not ckpt_path:
-                print(f"[OracleMotion:Loader] ❌ Invalid fine-tune path or traversal attempt: {fine_tuned_model}")
+                print(
+                    f"[OracleMotion:Loader] ❌ Invalid fine-tune path or traversal attempt: {fine_tuned_model}"
+                )
                 return (model,)
 
             bin_file = os.path.join(ckpt_path, "pytorch_model.bin")
 
             if os.path.exists(bin_file):
-                print(f"[OracleMotion:Loader] ♻️ Applying Fine-Tune weights: {fine_tuned_model}")
+                print(
+                    f"[OracleMotion:Loader] ♻️ Applying Fine-Tune weights: {fine_tuned_model}"
+                )
                 try:
                     state_dict = torch.load(bin_file, map_location="cpu")
                     keys = model.model.load_state_dict(state_dict, strict=False)
-                    print(f"[OracleMotion:Loader] ✅ Weights merged. (Missing keys: {len(keys.missing_keys)} - expected for PEFT)")
+                    print(
+                        f"[OracleMotion:Loader] ✅ Weights merged. (Missing keys: {len(keys.missing_keys)} - expected for PEFT)"
+                    )
 
                     # Inspect Config for Custom Speaker Names
                     cfg_file = os.path.join(ckpt_path, "config.json")
                     if os.path.exists(cfg_file):
-                        with open(cfg_file, 'r') as f:
+                        with open(cfg_file, "r") as f:
                             cfg_data = json.load(f)
-                            if "talker_config" in cfg_data and "spk_id" in cfg_data["talker_config"]:
+                            if (
+                                "talker_config" in cfg_data
+                                and "spk_id" in cfg_data["talker_config"]
+                            ):
                                 spk_ids = cfg_data["talker_config"]["spk_id"]
-                                print(f"[OracleMotion:Loader] ℹ️ Custom Speakers Found: {list(spk_ids.keys())}")
+                                print(
+                                    f"[OracleMotion:Loader] ℹ️ Custom Speakers Found: {list(spk_ids.keys())}"
+                                )
                 except Exception as e:
                     print(f"[OracleMotion:Loader] ❌ Error applying fine-tune: {e}")
             else:
-                print(f"[OracleMotion:Loader] ⚠️ Warning: pytorch_model.bin not found at {ckpt_path}")
+                print(
+                    f"[OracleMotion:Loader] ⚠️ Warning: pytorch_model.bin not found at {ckpt_path}"
+                )
 
         return (model,)
+
 
 # --- NODE: QWEN VOICE (DEBUG ENABLED) ---
 class OracleVoiceQwen:
@@ -769,7 +1005,7 @@ class OracleVoiceQwen:
                 "storyboard_json": ("STRING", {"forceInput": True}),
                 "qwen_model": ("QWEN_MODEL",),
                 "default_gender": (["Female", "Male"], {"default": "Female"}),
-                "seed": ("INT", {"default": 42, "min": 0, "max": 0xffffffffffffffff}),
+                "seed": ("INT", {"default": 42, "min": 0, "max": 0xFFFFFFFFFFFFFFFF}),
             }
         }
 
@@ -780,7 +1016,8 @@ class OracleVoiceQwen:
 
     def gen_voice_qwen(self, storyboard_json, qwen_model, default_gender, seed):
         import soundfile as sf
-        print(f"\n[OracleMotion:Voice] 🎙️ Starting Voice Generation Batch...")
+
+        print("\n[OracleMotion:Voice] 🎙️ Starting Voice Generation Batch...")
 
         try:
             scenes = json.loads(storyboard_json)
@@ -798,7 +1035,7 @@ class OracleVoiceQwen:
             torch.cuda.manual_seed_all(seed)
 
         for i, scene in enumerate(scenes):
-            scene_id = scene.get('scene_id', i)
+            scene_id = scene.get("scene_id", i)
             text = scene.get("dialogue", "")
 
             print(f"--- [Scene {scene_id}] ---")
@@ -814,16 +1051,16 @@ class OracleVoiceQwen:
                 if action:
                     instruct += f"\nContext: {action}"
 
-                print(f"[OracleMotion:Voice] 📝 Instruction:\n   Gender: {voice_name}\n   Emotion: {emotion}")
-                print(f"[OracleMotion:Voice] 🗣️ Text: \"{text[:30]}...\"")
+                print(
+                    f"[OracleMotion:Voice] 📝 Instruction:\n   Gender: {voice_name}\n   Emotion: {emotion}"
+                )
+                print(f'[OracleMotion:Voice] 🗣️ Text: "{text[:30]}..."')
 
                 try:
                     # 2. Generate
-                    print(f"[OracleMotion:Voice] ⏳ Generating Audio...")
+                    print("[OracleMotion:Voice] ⏳ Generating Audio...")
                     wavs, sr = qwen_model.generate_voice_design(
-                        text=text,
-                        instruct=instruct,
-                        output_dir=None
+                        text=text, instruct=instruct, output_dir=None
                     )
 
                     if not wavs or len(wavs) == 0:
@@ -832,7 +1069,9 @@ class OracleVoiceQwen:
                     # 3. Process Output
                     audio_data = wavs[0]
                     duration = len(audio_data) / sr
-                    print(f"[OracleMotion:Voice] ✅ Generated. Duration: {duration:.2f}s")
+                    print(
+                        f"[OracleMotion:Voice] ✅ Generated. Duration: {duration:.2f}s"
+                    )
 
                     # 4. Save
                     fname = f"qwen_audio_{scene_id}_{uuid.uuid4().hex[:6]}.wav"
@@ -842,18 +1081,22 @@ class OracleVoiceQwen:
 
                     # 5. Update JSON
                     scene["audio_path"] = fpath
-                    scene["duration"] = duration + 0.2 # Slight padding
+                    scene["duration"] = duration + 0.2  # Slight padding
 
                 except Exception as e:
-                    print(f"[OracleMotion:Voice] ❌ Generation Error in Scene {scene_id}: {e}")
-                    print(f"[OracleMotion:Voice] ⚠️ Fallback to silent 3.0s duration.")
+                    print(
+                        f"[OracleMotion:Voice] ❌ Generation Error in Scene {scene_id}: {e}"
+                    )
+                    print("[OracleMotion:Voice] ⚠️ Fallback to silent 3.0s duration.")
                     scene["duration"] = 3.0
             else:
-                print(f"[OracleMotion:Voice] 🔇 No dialogue detected. Skipping generation.")
+                print(
+                    "[OracleMotion:Voice] 🔇 No dialogue detected. Skipping generation."
+                )
                 scene["duration"] = 3.0
 
             # VRAM Cleanup after each scene to prevent OOM
             cleanup_vram()
 
-        print(f"[OracleMotion:Voice] 🎉 Batch Complete. Returning updated JSON.\n")
+        print("[OracleMotion:Voice] 🎉 Batch Complete. Returning updated JSON.\n")
         return (json.dumps(scenes, indent=2),)
