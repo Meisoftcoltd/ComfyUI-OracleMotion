@@ -52,6 +52,9 @@ class OracleBrainAPI:
         text_input = narrative_text
 
         # 1. Audio Transcription
+        if audio_path:
+            audio_path = validate_path(folder_paths.get_input_directory(), audio_path)
+
         if audio_path and os.path.exists(audio_path):
             if WhisperModel is None:
                 print("Warning: faster_whisper not found. Skipping transcription.")
@@ -368,10 +371,19 @@ class OracleEngine:
         last_latent = None
 
         for i, path in enumerate(keyframe_paths):
+            # Validate path
+            safe_path = validate_path(folder_paths.get_output_directory(), path)
+            if not safe_path:
+                safe_path = validate_path(folder_paths.get_input_directory(), path)
+
+            if not safe_path or not os.path.exists(safe_path):
+                print(f"Warning: Invalid or missing keyframe path: {path}")
+                continue
+
             duration = scenes[i].get("duration", 4.0) if i < len(scenes) else 4.0
             num_frames = max(16, int(duration * fps))
 
-            img = Image.open(path).convert("RGB")
+            img = Image.open(safe_path).convert("RGB")
             w, h = img.size
             w, h = (w // 8) * 8, (h // 8) * 8
             img = img.resize((w, h))
@@ -543,6 +555,14 @@ class OraclePostProduction:
         scenes = json.loads(enhanced_storyboard_json)
 
         # Setup Font
+        if font_path:
+            # Try to validate against internal fonts or input dir
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            safe_font_path = validate_path(os.path.join(current_dir, "fonts"), font_path)
+            if not safe_font_path:
+                safe_font_path = validate_path(folder_paths.get_input_directory(), font_path)
+            font_path = safe_font_path
+
         try:
             font = ImageFont.truetype(font_path, font_size)
         except:
@@ -591,17 +611,29 @@ class OraclePostProduction:
         from moviepy.editor import VideoFileClip, concatenate_videoclips, AudioFileClip
 
         clips = []
-        for i, path in enumerate(video_paths):
-            if os.path.exists(path):
-                clip = VideoFileClip(path)
-                if i < len(scenes):
-                    apath = scenes[i].get("audio_path")
-                    if apath and os.path.exists(apath):
-                        aclip = AudioFileClip(apath)
-                        clip = clip.set_audio(aclip)
-                        if abs(clip.duration - aclip.duration) > 0.5:
-                            clip = clip.set_duration(aclip.duration)
-                clips.append(clip)
+        if video_paths:
+            for i, path in enumerate(video_paths):
+                # Validate video path
+                safe_vpath = validate_path(folder_paths.get_output_directory(), path)
+                if not safe_vpath:
+                    safe_vpath = validate_path(folder_paths.get_input_directory(), path)
+
+                if safe_vpath and os.path.exists(safe_vpath):
+                    clip = VideoFileClip(safe_vpath)
+                    if i < len(scenes):
+                        apath = scenes[i].get("audio_path")
+                        if apath:
+                            # Validate audio path
+                            safe_apath = validate_path(folder_paths.get_output_directory(), apath)
+                            if not safe_apath:
+                                safe_apath = validate_path(folder_paths.get_input_directory(), apath)
+
+                            if safe_apath and os.path.exists(safe_apath):
+                                aclip = AudioFileClip(safe_apath)
+                                clip = clip.set_audio(aclip)
+                                if abs(clip.duration - aclip.duration) > 0.5:
+                                    clip = clip.set_duration(aclip.duration)
+                    clips.append(clip)
 
         if not clips: return ("", torch.zeros((1,512,512,3)))
 
