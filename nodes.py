@@ -999,7 +999,7 @@ class OracleQwenLoader:
                     f"[OracleMotion:Loader] ♻️ Applying Fine-Tune weights: {fine_tuned_model}"
                 )
                 try:
-                    state_dict = torch.load(bin_file, map_location="cpu")
+                    state_dict = torch.load(bin_file, map_location="cpu", weights_only=True)
                     keys = model.model.load_state_dict(state_dict, strict=False)
                     print(
                         f"[OracleMotion:Loader] ✅ Weights merged. (Missing keys: {len(keys.missing_keys)} - expected for PEFT)"
